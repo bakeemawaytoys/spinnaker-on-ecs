@@ -1,0 +1,52 @@
+artifactSources:
+  debianRepository: https://dl.bintray.com/spinnaker-releases/debians
+  dockerRegistry: gcr.io/spinnaker-marketplace
+  gitPrefix: https://github.com/spinnaker
+  googleImageProject: marketplace-spinnaker-release
+dependencies:
+  consul:
+    version: 0.7.5
+  redis:
+    version: 2:2.8.4-2
+  vault:
+    version: 0.7.0
+services:
+  clouddriver:
+    commit: a1487014a21d456f4bf59873e0acd13de3a7c835
+    version: 3.4.5-20180927041608
+  deck:
+    commit: b66f7fe282edb3bdeafed23f583dbd0f4c6cf827
+    version: 2.4.3-20180926041608
+  defaultArtifact: {}
+  echo:
+    commit: c52ac8a652d61470ca5a0ad772932f3025f5434f
+    version: 2.0.1-20180817041609
+  fiat:
+    commit: 2c8212dbceeffb44c056e53ba956b49ada7e1c21
+    version: 1.0.1-20180829141913
+  front50:
+    commit: 13c2f19d1e541e25f1d9c72e96941d6cf8bd77bc
+    version: 0.12.0-20180802022808
+  gate:
+    commit: 95b28a6207a23528aa61478395b454db0da19495
+    version: 1.1.3-20180929041608
+  igor:
+    commit: 12641e2de0d540dd9207f5f5707fdb831a4fe8e4
+    version: 0.12.0-20180726022808
+  kayenta:
+    commit: 3f7ed7017948bc2da770fc91d20993539d21981c
+    version: 0.3.0-20180724022806
+  monitoring-daemon:
+    commit: 1b2c9a294a36c3875edbbddcec264c4036e64e7a
+    version: 0.8.1-20180925041608
+  monitoring-third-party:
+    commit: 1b2c9a294a36c3875edbbddcec264c4036e64e7a
+    version: 0.8.1-20180925041608
+  orca:
+    commit: ec84726c3d1d9c8820be543529d8765ec44b620f
+    version: 1.0.2-20180927041608
+  rosco:
+    commit: c057c1d4372c54a0f6d03ec6532fcfbbc9aafcb2
+    version: 0.7.3-20180818041609
+timestamp: '2018-09-29 08:16:14'
+version: 1.9.5
