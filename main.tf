@@ -124,6 +124,9 @@ resource "aws_service_discovery_service" "spinnaker" {
     }
     routing_policy = "MULTIVALUE"
   }
+  health_check_custom_config {
+    failure_threshold = 5
+  }
   name = each.key
   tags = local.tags
 }
@@ -330,7 +333,7 @@ resource "aws_iam_role_policy" "task_execution_role" {
 # Create a managed policy for Envoy Proxy auth permissions that can be attached to multiple task roles
 data "aws_iam_policy_document" "app_mesh" {
   statement {
-    sid = "value"
+    sid = "AppMeshRegistration"
     actions = [
       "appmesh:StreamAggregatedResources",
     ]
@@ -363,37 +366,42 @@ resource "aws_iam_role_policy_attachment" "spinnaker_task_role" {
 resource "aws_security_group" "spinnaker" {
   name_prefix = "spinnaker-"
   description = "Common security group for Spinnaker ECS tasks"
+  tags        = local.tags
+  vpc_id      = data.aws_vpc.default.id
+}
 
-  ingress {
-    description = "All the tasks to talk to each other on any port"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    self        = true
-  }
+resource "aws_security_group_rule" "spinnaker_self_ingress" {
+  description       = "All the tasks to talk to each other on any port"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  self              = true
+  security_group_id = aws_security_group.spinnaker.id
+  type              = "ingress"
+}
 
-  egress {
-    description = "Allow full egress in the VPC CIDR block"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = [
-      data.aws_vpc.default.cidr_block,
-    ]
-  }
+resource "aws_security_group_rule" "spinnaker_https_egress" {
+  description = "Allow full egress on HTTPS pulling images and AWS API access"
+  from_port   = 443
+  to_port     = 443
+  protocol    = "tcp"
+  cidr_blocks = [
+    "0.0.0.0/0",
+  ]
+  security_group_id = aws_security_group.spinnaker.id
+  type              = "egress"
+}
 
-  egress {
-    description = "Allow full egress on HTTPS pulling images and AWS API access"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = [
-      "0.0.0.0/0",
-    ]
-  }
-
-  tags   = local.tags
-  vpc_id = data.aws_vpc.default.id
+resource "aws_security_group_rule" "spinnaker_vpc_egress" {
+  description = "Allow full egress in the VPC CIDR block"
+  from_port   = 0
+  to_port     = 0
+  protocol    = "-1"
+  cidr_blocks = [
+    data.aws_vpc.default.cidr_block,
+  ]
+  security_group_id = aws_security_group.spinnaker.id
+  type              = "egress"
 }
 
 ### ECS RESOURCES ###
@@ -536,8 +544,6 @@ resource "aws_iam_role_policy" "clouddriver" {
   role   = aws_iam_role.clouddriver.id
 }
 
-#TODO Add EC2 managed policy
-
 locals {
   clouddriver_container_definition = {
     name = "clouddriver"
@@ -566,8 +572,17 @@ locals {
       }
     ]
     essential = true
-    image     = local.docker_images["clouddriver"]
-    # TODO: Health check
+    healthcheck = {
+      command = [
+        "CMD-SHELL",
+        "/usr/bin/wget --spider http://localhost:${local.services["clouddriver"].port}/health"
+      ]
+      interval    = 30
+      retries     = 3
+      timeout     = 5
+      startPeriod = 30
+    }
+    image = local.docker_images["clouddriver"]
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -599,7 +614,15 @@ resource "aws_ecs_task_definition" "clouddriver" {
   tags                     = local.tags
 }
 
-resource "aws_ecs_service" "clouddriver" {
+resource "aws_ecs_service" "spinnaker" {
+  # Construct a map of name to arn for each task definition to iterate through because 
+  # they are the only two values that vary among each service definition
+  for_each = {
+    for definition in [
+      aws_ecs_task_definition.clouddriver
+    ] :
+    definition.family => definition.arn
+  }
   cluster                 = aws_ecs_cluster.spinnaker.name
   desired_count           = 1
   enable_ecs_managed_tags = true
@@ -614,11 +637,11 @@ resource "aws_ecs_service" "clouddriver" {
       aws_security_group.spinnaker.id
     ]
   }
-  name             = "clouddriver"
+  name             = each.key
   platform_version = "1.4.0"
   service_registries {
-    registry_arn = aws_service_discovery_service.spinnaker["clouddriver"].arn
+    registry_arn = aws_service_discovery_service.spinnaker[each.key].arn
   }
-  tags             = local.tags
-  task_definition  = aws_ecs_task_definition.clouddriver.arn
+  tags            = local.tags
+  task_definition = each.value
 }
