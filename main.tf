@@ -149,123 +149,6 @@ resource "aws_service_discovery_service" "redis" {
   tags         = local.tags
 }
 
-### App Mesh Resources
-
-# Create the App Mesh service-linked role so that it can register instances in Cloud Map
-# https://docs.aws.amazon.com/app-mesh/latest/userguide/using-service-linked-roles.html
-resource "aws_iam_service_linked_role" "app_mesh" {
-  aws_service_name = "appmesh.amazonaws.com"
-  description      = "Role to enable AWS App Mesh to manage resources in your Mesh."
-}
-
-resource "aws_appmesh_mesh" "spinnaker" {
-  name = "spinnaker"
-  spec {
-    egress_filter {
-      type = "DROP_ALL"
-    }
-  }
-  tags = local.tags
-}
-
-resource "aws_appmesh_virtual_node" "redis" {
-  mesh_name = aws_appmesh_mesh.spinnaker.name
-  name      = "redis"
-  spec {
-    listener {
-      port_mapping {
-        port     = local.redis_port
-        protocol = "tcp"
-      }
-    }
-    service_discovery {
-      aws_cloud_map {
-        namespace_name = aws_service_discovery_private_dns_namespace.spinnaker.name
-        service_name   = aws_service_discovery_service.redis.name
-      }
-    }
-  }
-  tags = local.tags
-}
-
-resource "aws_appmesh_virtual_service" "redis" {
-  mesh_name = aws_appmesh_mesh.spinnaker.name
-  name      = "redis"
-  spec {
-    provider {
-      virtual_node {
-        virtual_node_name = aws_appmesh_virtual_node.redis.name
-      }
-    }
-  }
-  tags = local.tags
-}
-
-resource "aws_appmesh_virtual_router" "spinnaker" {
-  for_each  = local.services
-  mesh_name = aws_appmesh_mesh.spinnaker.name
-  name      = each.key
-  spec {
-    listener {
-      port_mapping {
-        port     = each.value["port"]
-        protocol = "http"
-      }
-    }
-  }
-  tags = local.tags
-}
-
-resource "aws_appmesh_virtual_service" "spinnaker" {
-  for_each  = local.services
-  mesh_name = aws_appmesh_mesh.spinnaker.name
-  name      = each.key
-  spec {
-    provider {
-      virtual_router {
-        virtual_router_name = aws_appmesh_virtual_router.spinnaker[each.key].name
-      }
-    }
-  }
-  tags = local.tags
-}
-
-resource "aws_appmesh_virtual_node" "spinnaker" {
-  for_each  = local.services
-  mesh_name = aws_appmesh_mesh.spinnaker.name
-  name      = each.key
-  spec {
-    dynamic "backend" {
-      for_each = each.value["backends"]
-      content {
-        virtual_service {
-          virtual_service_name = aws_appmesh_virtual_service.spinnaker[backend.value].name
-        }
-      }
-    }
-    backend {
-      virtual_service {
-        virtual_service_name = aws_appmesh_virtual_service.redis.name
-      }
-    }
-    listener {
-      port_mapping {
-        port     = local.services[each.key].port
-        protocol = "http"
-      }
-    }
-    service_discovery {
-      aws_cloud_map {
-        service_name   = aws_service_discovery_service.spinnaker[each.key].name
-        namespace_name = aws_service_discovery_private_dns_namespace.spinnaker.name
-      }
-    }
-  }
-  tags = local.tags
-}
-
-
-
 ## Create common resources to be used by all of the ECS services
 
 # Logging resources
@@ -328,37 +211,6 @@ data "aws_iam_policy_document" "task_execution_role" {
 resource "aws_iam_role_policy" "task_execution_role" {
   role   = aws_iam_role.task_execution_role.id
   policy = data.aws_iam_policy_document.task_execution_role.json
-}
-
-# Create a managed policy for Envoy Proxy auth permissions that can be attached to multiple task roles
-data "aws_iam_policy_document" "app_mesh" {
-  statement {
-    sid = "AppMeshRegistration"
-    actions = [
-      "appmesh:StreamAggregatedResources",
-    ]
-    resources = [
-      "${aws_appmesh_mesh.spinnaker.arn}/virtualNode/*"
-    ]
-  }
-}
-
-resource "aws_iam_policy" "app_mesh" {
-  description = "Envoy proxy access to the Spinnaker App Mesh"
-  name_prefix = "spinnaker_app_mesh_envoy_proxy_auth-"
-  policy      = data.aws_iam_policy_document.app_mesh.json
-}
-
-# Create a default task role for the services that don't interact with AWS
-resource "aws_iam_role" "spinnaker_task_role" {
-  name_prefix        = "spinnaker_task_role-"
-  assume_role_policy = data.aws_iam_policy_document.ecs_assume_role.json
-  tags               = local.tags
-}
-
-resource "aws_iam_role_policy_attachment" "spinnaker_task_role" {
-  policy_arn = aws_iam_policy.app_mesh.arn
-  role       = aws_iam_role.spinnaker_task_role.id
 }
 
 # Networking resources
@@ -460,7 +312,6 @@ resource "aws_ecs_task_definition" "redis" {
   memory                   = 1024
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  task_role_arn            = aws_iam_role.spinnaker_task_role.arn
   tags                     = local.tags
 }
 
@@ -524,11 +375,6 @@ resource "aws_iam_role" "clouddriver" {
   description        = "Assumed by Spinnaker's Clouddriver service"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume_role.json
   tags               = local.tags
-}
-
-resource "aws_iam_role_policy_attachment" "clouddriver_app_mesh" {
-  policy_arn = aws_iam_policy.app_mesh.arn
-  role       = aws_iam_role.clouddriver.id
 }
 
 data "aws_iam_policy_document" "clouddriver" {
