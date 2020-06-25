@@ -149,6 +149,14 @@ resource "aws_service_discovery_service" "redis" {
   tags         = local.tags
 }
 
+locals {
+  service_urls = {
+    for name, properties in local.services :
+    name => "http://${aws_service_discovery_service.spinnaker[name].name}.${aws_service_discovery_private_dns_namespace.spinnaker.name}:${properties.port}"
+  }
+  redis_url = "redis://${aws_service_discovery_service.redis.name}.${aws_service_discovery_private_dns_namespace.spinnaker.name}:${local.redis_port}"
+}
+
 ## Create common resources to be used by all of the ECS services
 
 # Logging resources
@@ -396,7 +404,7 @@ locals {
     environment = [
       {
         name  = "redis.connection"
-        value = "redis://${aws_service_discovery_service.redis.name}.${aws_service_discovery_private_dns_namespace.spinnaker.name}:${local.redis_port}"
+        value = local.redis_url
       },
       {
         name  = "aws.enabled"
@@ -460,12 +468,23 @@ resource "aws_ecs_task_definition" "clouddriver" {
   tags                     = local.tags
 }
 
+module "rosco_task_definition" {
+  source             = "./modules/spinnaker-task-definition"
+  execution_role_arn = aws_iam_role.task_execution_role.arn
+  image              = local.docker_images["rosco"]
+  name               = "rosco"
+  port               = local.services["rosco"].port
+  redis_url = local.redis_url
+  tags               = local.tags
+}
+
 resource "aws_ecs_service" "spinnaker" {
   # Construct a map of name to arn for each task definition to iterate through because 
   # they are the only two values that vary among each service definition
   for_each = {
     for definition in [
-      aws_ecs_task_definition.clouddriver
+      aws_ecs_task_definition.clouddriver,
+      module.rosco_task_definition.task_definition_attributes,
     ] :
     definition.family => definition.arn
   }

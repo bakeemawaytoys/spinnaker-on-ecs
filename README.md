@@ -11,7 +11,6 @@ server:
   compression:
     enabled: true
 
-
 redis:
   connection: redis://localhost:6379
 

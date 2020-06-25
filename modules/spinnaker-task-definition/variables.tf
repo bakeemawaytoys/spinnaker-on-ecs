@@ -16,16 +16,19 @@ variable "image" {
 variable "cpu" {
   type        = number
   description = "(optional) describe your variable"
+  default = 256
 }
 
 variable "memory" {
   type        = number
   description = "(optional) describe your variable"
+  default = 1024
 }
 
 variable "cloudwatch_log_group_name" {
   type        = string
   description = "(optional) describe your variable"
+  default = "/ecs/spinnaker"
 }
 
 variable "environment" {
@@ -46,8 +49,18 @@ variable "execution_role_arn" {
   description = "(optional) describe your variable"
 }
 
+variable "redis_url" {
+  type = string
+  description = "(optional) describe your variable"
+}
+
 variable "task_role_arn" {
   type        = string
   description = "(optional) describe your variable"
   default     = null
+}
+
+variable "tags" {
+  type = map(string)
+  description = "(optional) describe your variable"
 }

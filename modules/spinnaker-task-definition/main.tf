@@ -1,8 +1,29 @@
+data "aws_region" "current" {}
+
 locals {
+
+  standard_environment = [
+    {
+      name  = "redis.connection"
+      value = var.redis_url
+    },
+    # Disable the Spring Boot banner so that it doesn't screw up the log parsing
+    # https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#boot-features-banner
+    {
+      name  = "spring.main.banner-mode"
+      value = "off"
+    },
+    {
+      name  = "aws.enabled"
+      value = "true"
+    },
+
+  ]
+
   container_definition = {
-    name = var.name
-    environment = var.environment
-    essential = true
+    name        = var.name
+    environment = concat(var.environment, local.standard_environment)
+    essential   = true
     healthcheck = {
       command = [
         "CMD-SHELL",
@@ -42,5 +63,5 @@ resource "aws_ecs_task_definition" "spinnaker" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = var.task_role_arn
-  tags                     = local.tags
+  tags                     = var.tags
 }
