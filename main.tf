@@ -325,7 +325,7 @@ resource "aws_ecs_task_definition" "redis" {
 
 resource "aws_ecs_service" "redis" {
   cluster                 = aws_ecs_cluster.spinnaker.name
-  desired_count           = 1
+  desired_count           = 0
   enable_ecs_managed_tags = true
   launch_type             = "FARGATE"
   network_configuration {
@@ -398,98 +398,49 @@ resource "aws_iam_role_policy" "clouddriver" {
   role   = aws_iam_role.clouddriver.id
 }
 
-locals {
-  clouddriver_container_definition = {
-    name = "clouddriver"
-    environment = [
-      {
-        name  = "redis.connection"
-        value = local.redis_url
-      },
-      {
-        name  = "aws.enabled"
-        value = "true"
-      },
-      {
-        name  = "aws.defaultRegions[0].name"
-        value = data.aws_region.current.name
-      },
-      {
-        name  = "aws.defaultAssumeRole"
-        value = "role/${aws_iam_role.spinnaker.name}"
-      },
-      # Disable the Spring Boot banner so that it doesn't screw up the log parsing
-      # https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#boot-features-banner
-      {
-        name  = "spring.main.banner-mode"
-        value = "off"
-      }
-    ]
-    essential = true
-    healthcheck = {
-      command = [
-        "CMD-SHELL",
-        "/usr/bin/wget --spider http://localhost:${local.services["clouddriver"].port}/health"
-      ]
-      interval    = 30
-      retries     = 3
-      timeout     = 5
-      startPeriod = 30
-    }
-    image = local.docker_images["clouddriver"]
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        awslogs-group         = aws_cloudwatch_log_group.spinnaker.name
-        awslogs-region        = data.aws_region.current.name
-        awslogs-stream-prefix = "clouddriver"
-        # Example prefix: 2020-06-24 14:26:21.739 
-        # https://docs.docker.com/config/containers/logging/awslogs/#awslogs-datetime-format
-        awslogs-datetime-format = "%Y-%m-%d %H:%M:%S.%L"
-      }
-    }
-    portMappings = [
-      {
-        containerPort = local.services["clouddriver"].port
-      }
-    ]
-  }
-}
+module "clouddriver_task_definition" {
+  source = "./modules/spinnaker-task-definition"
 
-resource "aws_ecs_task_definition" "clouddriver" {
-  cpu                      = 512
-  family                   = "clouddriver"
-  container_definitions    = jsonencode([local.clouddriver_container_definition])
-  execution_role_arn       = aws_iam_role.task_execution_role.arn
-  memory                   = 2048
-  network_mode             = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  task_role_arn            = aws_iam_role.clouddriver.arn
-  tags                     = local.tags
+  cpu = 512
+  environment = [
+    {
+      name  = "aws.defaultAssumeRole"
+      value = "role/${aws_iam_role.spinnaker.name}"
+    },
+  ]
+  execution_role_arn = aws_iam_role.task_execution_role.arn
+  image              = local.docker_images["clouddriver"]
+  name               = "clouddriver"
+  port               = local.services["clouddriver"].port
+  redis_url          = local.redis_url
+  memory             = 2048
+  task_role_arn      = aws_iam_role.clouddriver.arn
+  tags               = local.tags
 }
 
 module "rosco_task_definition" {
-  source             = "./modules/spinnaker-task-definition"
+  source = "./modules/spinnaker-task-definition"
+
   execution_role_arn = aws_iam_role.task_execution_role.arn
   image              = local.docker_images["rosco"]
   name               = "rosco"
   port               = local.services["rosco"].port
-  redis_url = local.redis_url
+  redis_url          = local.redis_url
   tags               = local.tags
 }
 
 resource "aws_ecs_service" "spinnaker" {
-  # Construct a map of name to arn for each task definition to iterate through because 
-  # they are the only two values that vary among each service definition
+  # Construct a map of service names to task def arns for each task definition 
+  # to iterate through because they are the only two values that vary among 
+  # each service definition.
   for_each = {
     for definition in [
-      aws_ecs_task_definition.clouddriver,
+      module.clouddriver_task_definition.task_definition_attributes,
       module.rosco_task_definition.task_definition_attributes,
-    ] :
-    definition.family => definition.arn
+    ] : definition.family => definition.arn  
   }
   cluster                 = aws_ecs_cluster.spinnaker.name
-  desired_count           = 1
+  desired_count           = 0
   enable_ecs_managed_tags = true
   force_new_deployment    = true
   launch_type             = "FARGATE"

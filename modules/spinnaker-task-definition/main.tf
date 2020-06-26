@@ -17,7 +17,10 @@ locals {
       name  = "aws.enabled"
       value = "true"
     },
-
+    {
+      name  = "aws.defaultRegions[0].name"
+      value = data.aws_region.current.name
+    },
   ]
 
   container_definition = {
