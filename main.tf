@@ -81,6 +81,7 @@ locals {
     }
   }
 
+  # Dynamically construct the Docker image names from the Halyard BOM file
   bom             = yamldecode(file("./files/bom/${local.spinnaker_version}.yml"))
   docker_registry = local.bom["artifactSources"]["dockerRegistry"]
   images          = local.bom["services"]
@@ -325,7 +326,7 @@ resource "aws_ecs_task_definition" "redis" {
 
 resource "aws_ecs_service" "redis" {
   cluster                 = aws_ecs_cluster.spinnaker.name
-  desired_count           = 0
+  desired_count           = 1
   enable_ecs_managed_tags = true
   launch_type             = "FARGATE"
   network_configuration {
@@ -418,6 +419,46 @@ module "clouddriver_task_definition" {
   tags               = local.tags
 }
 
+module "fiat_task_definition" {
+  source = "./modules/spinnaker-task-definition"
+
+  execution_role_arn = aws_iam_role.task_execution_role.arn
+  image              = local.docker_images["fiat"]
+  name               = "fiat"
+  port               = local.services["fiat"].port
+  redis_url          = local.redis_url
+  tags               = local.tags
+}
+
+module "front50_task_definition" {
+  source = "./modules/spinnaker-task-definition"
+
+  environment = [
+    {
+      name = "cassandra.enabled"
+      value = "false"
+    },
+    {
+      name = "spinnaker.cassandra.enabled"
+      value = "false"
+    },
+    {
+      name = "spinnaker.redis.enabled"
+      value = "true"
+    },
+        {
+      name = "spinnaker.redis.host"
+      value = aws_service_discovery_service.redis.name
+    }
+  ]
+  execution_role_arn = aws_iam_role.task_execution_role.arn
+  image              = local.docker_images["front50"]
+  name               = "front50"
+  port               = local.services["front50"].port
+  redis_url          = local.redis_url
+  tags               = local.tags
+}
+
 module "rosco_task_definition" {
   source = "./modules/spinnaker-task-definition"
 
@@ -436,11 +477,13 @@ resource "aws_ecs_service" "spinnaker" {
   for_each = {
     for definition in [
       module.clouddriver_task_definition.task_definition_attributes,
+      module.fiat_task_definition.task_definition_attributes,
+      module.front50_task_definition.task_definition_attributes,
       module.rosco_task_definition.task_definition_attributes,
     ] : definition.family => definition.arn  
   }
   cluster                 = aws_ecs_cluster.spinnaker.name
-  desired_count           = 0
+  desired_count           = 1
   enable_ecs_managed_tags = true
   force_new_deployment    = true
   launch_type             = "FARGATE"
